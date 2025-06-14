@@ -15,9 +15,8 @@ const PORT = 5001;
 
 // ✅ Corrected CORS config
 app.use(cors({
-  origin: "http://localhost:3000", // your frontend URL
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true,
+  origin: ['http://localhost:3000', 'https://performance-tool-frontend.vercel.app'],
+  credentials: true
 }));
 
 app.use(bodyParser.json());
