@@ -6,13 +6,16 @@ import logger from './middlewares/logger.js';
 import errorHandler from './middlewares/errorHandler.js';
 import pool from './config/db.js';
 import authRoutes from "./routes/authRoutes.js";
+import employeesRoute from "./routes/employeesRoute.js"
+import managerRoutes from "./routes/managerRoutes.js"
+
 
 const app = express();
 const PORT = 5001;
 
 // ✅ Corrected CORS config
 app.use(cors({
-  origin: "http://localhost:3001", // your frontend URL
+  origin: "http://localhost:3000", // your frontend URL
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true,
 }));
@@ -20,12 +23,11 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(logger);
 
-app.get('/test', (req, res) => {
-  res.send('Server accessible!');
-});
-
 app.use('/api', performanceRoutes);
 app.use("/api/auth", authRoutes);
+app.use('/api' , employeesRoute)
+app.use("/api/manager", managerRoutes)
+
 
 app.use(errorHandler);
 
