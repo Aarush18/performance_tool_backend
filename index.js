@@ -15,7 +15,7 @@ const PORT = 5001;
 
 // ✅ Corrected CORS config
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://performance-tool-frontend.vercel.app'],
+  origin: ['http://localhost:3000', 'https://performance-tool-frontend-4lp6y1w96-aarush18s-projects.vercel.app'],
   credentials: true
 }));
 
