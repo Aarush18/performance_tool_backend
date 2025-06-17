@@ -1,19 +1,19 @@
 import jwt from 'jsonwebtoken'
 
-// ✅ Middleware to verify JWT token
 const auth = (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization
+    // ✅ Try both: header OR query param
+    const token =
+      req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.split(" ")[1]
+        : req.query.token
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
       return res.status(401).json({ message: 'Unauthorized: No token provided' })
     }
 
-    const token = authHeader.split(' ')[1]
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    req.user = decoded // inject user { id, email, role } into req
-
+    req.user = decoded
     next()
   } catch (err) {
     console.error('Auth error:', err.message || err)
@@ -23,7 +23,6 @@ const auth = (req, res, next) => {
 
 export default auth
 
-// ✅ Middleware to restrict access based on roles
 export const authorizeRoles = (roles = []) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
