@@ -10,6 +10,7 @@ import employeesRoute from "./routes/employeesRoute.js"
 import managerRoutes from "./routes/managerRoutes.js"
 import timelineRoutes from "./routes/timelineRoutes.js"
 import tagRoutes from "./routes/tagRoutes.js"
+import adminRoutes from "./routes/adminRoutes.js"
 
 
 
@@ -18,7 +19,7 @@ const PORT = 5001;
 
 // ✅ Corrected CORS config
 app.use(cors({
-  origin: ['http://localhost:3000','http://192.168.1.17:3000', 'https://performance-tool-frontend.vercel.app'],
+  origin: ['http://localhost:3001','http://192.168.1.17:3000', 'https://performance-tool-frontend.vercel.app'],
   credentials: true
 }));
 
@@ -31,7 +32,7 @@ app.use('/api' , employeesRoute)
 app.use("/api/manager", managerRoutes)
 app.use("/api/timeline", timelineRoutes)
 app.use("/api/tags", tagRoutes)
-
+app.use("/api/admin" , adminRoutes)
 
 
 app.use(errorHandler);
