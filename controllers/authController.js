@@ -4,6 +4,7 @@ import pool from '../config/db.js';
 import crypto from 'crypto';
 import { sendResetEmail } from '../utils/mailer.js';
 import { logActivity } from "../utils/logger.js";
+import bcrypt from 'bcrypt';
 
 dotenv.config();
 
@@ -27,13 +28,33 @@ export const login = async (req, res) => {
 
     const user = result.rows[0];
 
-    // ✅ Check password (for simplicity, plain comparison)
-    if (password !== user.password_hash) {
+    // Check if password_hash is a bcrypt hash (starts with $2)
+    const isBcryptHash = user.password_hash && user.password_hash.startsWith('$2');
+    let passwordMatch = false;
+
+    if (isBcryptHash) {
+      // Use bcrypt compare
+      passwordMatch = await bcrypt.compare(password, user.password_hash);
+    } else {
+      // Plain text check
+      passwordMatch = password === user.password_hash;
+      // If matches, migrate to bcrypt
+      if (passwordMatch) {
+        const saltRounds = 10;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        await pool.query(
+          'UPDATE users SET password_hash = $1 WHERE id = $2',
+          [hashedPassword, user.id]
+        );
+      }
+    }
+
+    if (!passwordMatch) {
       await logActivity(user.id, "Failed Login", `Failed login attempt for user: ${email}`);
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // ✅ Create JWT payload
+    // Create JWT payload
     const payload = {
       id: user.id,
       email: user.email,
@@ -46,7 +67,7 @@ export const login = async (req, res) => {
 
     await logActivity(user.id, "Login", `Successful login by ${email}`);
 
-    // ✅ Send forceReset flag if applicable
+    // Send forceReset flag if applicable
     return res.status(200).json({
       message: "Login successful",
       user: payload,

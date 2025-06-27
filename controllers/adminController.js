@@ -20,10 +20,13 @@ export const createUser = async (req, res) => {
   
       const roleId = roleQuery.rows[0].id;
   
-      // ✅ Insert into users
+      // ✅ Hash password before saving
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+
       await pool.query(
         'INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)',
-        [email, password, roleId]
+        [email, hashedPassword, roleId]
       );
   
       res.status(201).json({ message: "User created successfully" });
@@ -186,17 +189,28 @@ export const forceResetPassword = async (req, res) => {
 
     const user = result.rows[0];
 
-    // For dev: plain-text check, prod: bcrypt.compare
-    if (user.password_hash !== currentPassword) {
+    // Support both bcrypt and plain text for migration
+    const isBcryptHash = user.password_hash && user.password_hash.startsWith('$2');
+    let passwordMatch = false;
+    if (isBcryptHash) {
+      passwordMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    } else {
+      passwordMatch = user.password_hash === currentPassword;
+    }
+    if (!passwordMatch) {
       return res.status(401).json({ message: "Incorrect current password" });
     }
+
+    // Hash new password before saving
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
 
     await pool.query(
       `UPDATE users 
        SET password_hash = $1, 
            forcepasswordreset = FALSE 
        WHERE id = $2`,
-      [newPassword, userId]
+      [hashedNewPassword, userId]
     );
 
     res.status(200).json({ message: "Password updated successfully" });
