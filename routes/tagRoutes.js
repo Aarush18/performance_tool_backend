@@ -4,7 +4,7 @@ import { addTagToEmployee, getTagsForEmployee } from "../controllers/tagControll
 
 const router = express.Router()
 
-router.post("/:employeeId", auth, authorizeRoles(["ceo", "manager"]), addTagToEmployee)
-router.get("/:employeeId", auth, getTagsForEmployee)
+router.post("/:employeeId", auth, authorizeRoles(["ceo", "manager", "super-admin"]), addTagToEmployee)
+router.get("/:employeeId", auth, authorizeRoles(["ceo", "manager", "super-admin"]), getTagsForEmployee)
 
 export default router

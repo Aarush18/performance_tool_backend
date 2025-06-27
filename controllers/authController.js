@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import pool from '../config/db.js';
 import crypto from 'crypto';
 import { sendResetEmail } from '../utils/mailer.js';
+import { logActivity } from "../utils/logger.js";
 
 dotenv.config();
 
@@ -20,7 +21,6 @@ export const login = async (req, res) => {
       [email]
     );
 
-
     if (result.rows.length === 0) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -29,6 +29,7 @@ export const login = async (req, res) => {
 
     // ✅ Check password (for simplicity, plain comparison)
     if (password !== user.password_hash) {
+      await logActivity(user.id, "Failed Login", `Failed login attempt for user: ${email}`);
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -42,6 +43,8 @@ export const login = async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
+
+    await logActivity(user.id, "Login", `Successful login by ${email}`);
 
     // ✅ Send forceReset flag if applicable
     return res.status(200).json({
@@ -92,33 +95,44 @@ export const forgotPassword = async (req, res) => {
 
 // ✅ RESET PASSWORD
 export const resetPassword = async (req, res) => {
-  const { token } = req.params;
-  const { newPassword } = req.body;
+  const { token, newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    return res.status(400).json({ message: "Token and new password are required" });
+  }
 
   try {
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
 
+    // Hash new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password and reset flag
     const result = await pool.query(
-      'SELECT * FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
-      [hashedToken]
+      `UPDATE users 
+       SET password_hash = $1, 
+           forcepasswordreset = false 
+       WHERE id = $2 
+       RETURNING email`,
+      [hashedPassword, userId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(400).json({ message: 'Invalid or expired token' });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    const userId = result.rows[0].id;
+    await logActivity(userId, "Password Reset", `Password reset completed for user: ${result.rows[0].email}`);
 
-    // Save plain text password (for now, dev only)
-    await pool.query(
-      'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2',
-      [newPassword, userId]
-    );
-
-    res.status(200).json({ message: 'Password reset successful' });
+    res.json({ message: "Password reset successful" });
   } catch (err) {
-    console.error('Reset Password Error:', err);
-    res.status(500).json({ message: 'Server error' });
+    if (err.name === "JsonWebTokenError") {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+    console.error("Password reset error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -135,3 +149,24 @@ export const getQuickLoginUsers = async (req, res) => {
     res.status(500).json({ message: "Server error" })
   }
 }
+
+export const getManagers = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT u.id, u.email 
+      FROM users u
+      JOIN roles r ON u.role_id = r.id
+      WHERE r.name = 'manager'
+      ORDER BY u.email
+    `);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "No managers found" });
+    }
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Failed to fetch managers", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

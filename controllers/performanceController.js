@@ -12,20 +12,28 @@ export const getPerformanceNotes = async (req, res) => {
     let result;
 
     if (role === "ceo") {
-      // ✅ CEO sees ALL notes, including private
       result = await pool.query(`
-        SELECT pn.id, pn.employee_id, e.name AS employee_name, pn.note, pn.type AS note_type,
-               pn.is_private, pn.created_at AS timestamp, LOWER(r.name) AS creator_role
+        SELECT 
+          pn.id,
+          pn.note,
+          pn.type AS note_type,
+          pn.created_at AS timestamp,
+          pn.is_private,
+          e.id AS employee_id,
+          e.name AS employee_name,
+          u.id AS creator_id,
+          u.email AS creator_email,
+          r.name AS creator_role
         FROM performance_notes pn
         JOIN employees e ON pn.employee_id = e.id
         JOIN users u ON pn.created_by = u.id
         JOIN roles r ON u.role_id = r.id
-        ORDER BY pn.created_at DESC
+        ORDER BY pn.created_at DESC;
       `);
     }
+    
 
     else if (role === "manager") {
-      // ✅ Manager sees notes of employees mapped to them, excluding private notes
       result = await pool.query(`
         SELECT pn.id, pn.employee_id, e.name AS employee_name, pn.note, pn.type AS note_type,
                pn.is_private, pn.created_at AS timestamp, LOWER(r.name) AS creator_role
@@ -33,11 +41,12 @@ export const getPerformanceNotes = async (req, res) => {
         JOIN employees e ON pn.employee_id = e.id
         JOIN users u ON pn.created_by = u.id
         JOIN roles r ON u.role_id = r.id
-        WHERE e.manager_id = $1 AND pn.is_private = false
+        WHERE pn.created_by = $1 AND pn.is_private = false
         ORDER BY pn.created_at DESC
       `, [userId]);
     }
-
+    
+    
     else if (role === "hr") {
       // ✅ HR sees only public notes (is_private = false)
       result = await pool.query(`
@@ -182,10 +191,15 @@ export const getEmployeeList = async (req, res) => {
     // Managers can only view their team
     else if (userRole === "manager") {
       result = await pool.query(
-        `SELECT id, name FROM employees WHERE active_flag = true AND manager_id = $1`,
+        `SELECT id, name FROM employees 
+         WHERE active_flag = true 
+         AND id IN (
+           SELECT employee_id FROM manager_employees WHERE manager_id = $1
+         )`,
         [userId]
       );
     }
+    
 
     else {
       return res.status(403).json({ message: "Access denied" });
@@ -224,7 +238,7 @@ export const updatePerformanceNote = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT pn.*, e.manager_id FROM performance_notes pn
+      `SELECT pn.*, e.manager_id, e.name as employee_name FROM performance_notes pn
        JOIN employees e ON pn.employee_id = e.id
        WHERE pn.id = $1`,
       [noteId]
@@ -253,6 +267,8 @@ export const updatePerformanceNote = async (req, res) => {
       [note, type, noteId]
     );
 
+    await logActivity(userId, "Update Note", `Updated ${type} note for employee ${existingNote.employee_name}`);
+
     res.status(200).json({ message: "Note updated successfully" });
   } catch (err) {
     console.error("❌ Error updating note:", err);
@@ -263,41 +279,36 @@ export const updatePerformanceNote = async (req, res) => {
 
 export const deletePerformanceNote = async (req, res) => {
   const noteId = req.params.id;
-  const userRole = req.user.role;
   const userId = req.user.id;
 
   try {
-    const result = await pool.query(
-      `SELECT pn.*, e.manager_id FROM performance_notes pn
+    // Get note details before deletion for logging
+    const noteResult = await pool.query(
+      `SELECT pn.*, e.name as employee_name 
+       FROM performance_notes pn
        JOIN employees e ON pn.employee_id = e.id
        WHERE pn.id = $1`,
       [noteId]
     );
 
-    if (result.rows.length === 0) {
+    if (noteResult.rows.length === 0) {
       return res.status(404).json({ message: "Note not found" });
     }
 
-    const existingNote = result.rows[0];
+    const note = noteResult.rows[0];
 
-    // Check role-based access
-    if (
-      userRole === "manager" &&
-      (existingNote.manager_id !== userId || existingNote.is_private)
-    ) {
-      return res.status(403).json({ message: "Access denied" });
+    const result = await pool.query("DELETE FROM performance_notes WHERE id = $1", [noteId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "Note not found" });
     }
 
-    if (userRole === "hr") {
-      return res.status(403).json({ message: "Access denied" });
-    }
+    await logActivity(userId, "Delete Note", `Deleted ${note.type} note for employee ${note.employee_name}`);
 
-    await pool.query(`DELETE FROM performance_notes WHERE id = $1`, [noteId]);
-
-    res.status(200).json({ message: "Note deleted successfully" });
+    res.json({ message: "Note deleted successfully" });
   } catch (err) {
-    console.error("❌ Error deleting note:", err);
-    res.status(500).json({ message: "Error deleting note" });
+    console.error("Delete note error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 

@@ -5,6 +5,9 @@ import {
   addPerformanceNote,
   deleteNoteById,
   updateNoteById,
+  getManagerActivityLogs,
+  updateManagerActivityLog,
+  deleteManagerActivityLog
 } from "../controllers/managerController.js"
 
 const router = express.Router()
@@ -24,5 +27,10 @@ router.put("/notes/:noteId", updateNoteById)
 
 // DELETE a note
 router.delete("/notes/:noteId", deleteNoteById)
+
+// Activity Logs
+router.get("/activityLogs", auth, authorizeRoles(["manager"]), getManagerActivityLogs)
+router.put("/activityLogs/:id", auth, authorizeRoles(["manager"]), updateManagerActivityLog)
+router.delete("/activityLogs/:id", auth, authorizeRoles(["manager"]), deleteManagerActivityLog)
 
 export default router
