@@ -55,7 +55,7 @@ export const createUser = async (req, res) => {
 export const getAllUsers = async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT u.id, u.email, r.name AS role
+            `SELECT u.id, u.email, r.name AS role, u.status
              FROM users u
              JOIN roles r ON u.role_id = r.id
              ORDER BY u.id`
@@ -134,6 +134,36 @@ export const deleteUser = async (req, res) => {
     }
 };
 
+export const updateUserStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status || !['active', 'inactive', 'archived'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status provided" });
+    }
+
+    try {
+        const result = await pool.query(
+            "UPDATE users SET status = $1 WHERE id = $2 RETURNING id, email, status",
+            [status, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        await logActivity(req.user.id, "Update User Status", `Set user ${result.rows[0].email} status to ${status}`);
+
+        res.json({
+            message: `User status updated to ${status}`,
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error("Update user status error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 export const updateUserRole = async (req, res) => {
     const { id } = req.params;
     const { role } = req.body;
@@ -199,11 +229,43 @@ export const forceResetPassword = async (req, res) => {
         await logActivity(req.user.id, "Force Password Reset", `Forced password reset for user: ${result.rows[0].email}`);
 
         res.json({
-            message: "Password reset successfully",
+            message: "Password reset forced successfully",
             user: result.rows[0]
         });
     } catch (err) {
         console.error("Force password reset error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const changeUserPassword = async (req, res) => {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    const adminId = req.user.id;
+
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters long" });
+    }
+
+    try {
+        const saltRounds = 10;
+        const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+        const result = await pool.query(
+            "UPDATE users SET password_hash = $1, forcepasswordreset = false WHERE id = $2 RETURNING id, email",
+            [hashedPassword, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        const userEmail = result.rows[0].email;
+        await logActivity(adminId, "Change User Password", `Changed password for user: ${userEmail}`);
+
+        res.json({ message: `Password for ${userEmail} has been updated successfully.` });
+    } catch (err) {
+        console.error("Change user password error:", err);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -667,17 +729,30 @@ export const importEmployeesCSV = async (req, res) => {
         .on('end', async () => {
             // Insert employees in bulk
             let successCount = 0
+            const successfulEmails = [];
             for (const emp of results) {
                 try {
-                    await pool.query(
-                        'INSERT INTO employees (name, email, active_flag) VALUES ($1, $2, true) ON CONFLICT (email) DO NOTHING',
+                    const result = await pool.query(
+                        'INSERT INTO employees (name, email, active_flag) VALUES ($1, $2, true) ON CONFLICT (email) DO NOTHING RETURNING *',
                         [emp.name, emp.email]
                     )
-                    successCount++
+                    if (result.rows.length > 0) {
+                        successCount++
+                        successfulEmails.push(emp.email);
+                    }
                 } catch (err) {
                     errors.push({ row: emp, error: err.message })
                 }
             }
+
+            if (successCount > 0) {
+                await logActivity(
+                    req.user.id,
+                    "Bulk Import Employees",
+                    `Successfully imported ${successCount} employees: ${successfulEmails.join(', ')}`
+                );
+            }
+
             fs.unlinkSync(filePath) // Clean up uploaded file
             res.json({
                 message: `Imported ${successCount} employees.`,

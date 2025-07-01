@@ -15,10 +15,10 @@ export const login = async (req, res) => {
   try {
     // Fetch user with role and forcePasswordReset status
     const result = await pool.query(
-      `SELECT u.id, u.email, u.password_hash, r.name AS role, u.forcepasswordreset AS "forceReset"
-   FROM users u
-   JOIN roles r ON u.role_id = r.id
-   WHERE u.email = $1`,
+      `SELECT u.id, u.email, u.password_hash, u.status, r.name AS role, u.forcepasswordreset AS "forceReset"
+       FROM users u
+       JOIN roles r ON u.role_id = r.id
+       WHERE u.email = $1`,
       [email]
     );
 
@@ -27,6 +27,12 @@ export const login = async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    // Check if user is active
+    if (user.status !== 'active') {
+      await logActivity(user.id, "Failed Login", `Inactive user login attempt: ${email}`);
+      return res.status(403).json({ message: "Account is inactive. Please contact an administrator." });
+    }
 
     // Check if password_hash is a bcrypt hash (starts with $2)
     const isBcryptHash = user.password_hash && user.password_hash.startsWith('$2');
@@ -123,35 +129,30 @@ export const resetPassword = async (req, res) => {
   }
 
   try {
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.id;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Hash new password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update password and reset flag
     const result = await pool.query(
-      `UPDATE users 
-       SET password_hash = $1, 
-           forcepasswordreset = false 
-       WHERE id = $2 
-       RETURNING email`,
-      [hashedPassword, userId]
+      'SELECT * FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
+      [hashedToken]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(400).json({ message: 'Invalid or expired token' });
     }
 
-    await logActivity(userId, "Password Reset", `Password reset completed for user: ${result.rows[0].email}`);
+    const user = result.rows[0];
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2',
+      [hashedPassword, user.id]
+    );
+
+    await logActivity(user.id, "Password Reset", `Password reset completed for user: ${user.email}`);
 
     res.json({ message: "Password reset successful" });
   } catch (err) {
-    if (err.name === "JsonWebTokenError") {
-      return res.status(401).json({ message: "Invalid or expired token" });
-    }
     console.error("Password reset error:", err);
     res.status(500).json({ message: "Server error" });
   }

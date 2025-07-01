@@ -2,11 +2,17 @@ import nodemailer from 'nodemailer';
 
 // Step 1: Create transporter
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.office365.com',
+  port: 587,
+  secure: false,
   auth: {
-    user: process.env.EMAIL_USER || 'aarushgupta2k25@gmail.com',
-    pass: process.env.EMAIL_PASS || 'rvmkxmqsqlcpckru', // No spaces here
+    user: 'it.application@tech-bridge.biz',
+    pass: 'nqmhbdhkbmbdnygn'
   },
+  tls: {
+    ciphers: 'SSLv3',
+    rejectUnauthorized: false
+  }
 });
 
 // Step 2: Verify transporter (shows if Gmail allows connection)
@@ -21,8 +27,8 @@ transporter.verify((error, success) => {
 // Step 3: Test Mail Sender (Manual test)
 export const sendTestEmail = () => {
   const testMailOptions = {
-    from: process.env.EMAIL_USER || 'aarushgupta2k25@gmail.com',
-    to: 'aarushgupta2018@gmail.com', // Use your other email to check
+    from: 'it.application@tech-bridge.biz',
+    to: 'aarushgupta2018@gmail.com',
     subject: '✅ Test Mail from Node.js',
     text: 'This is a test email from the mailer setup.',
   };
@@ -40,7 +46,7 @@ export const sendTestEmail = () => {
 export const sendResetEmail = async (email, token) => {
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
   const resetMailOptions = {
-    from: process.env.EMAIL_USER,
+    from: 'it.application@tech-bridge.biz',
     to: email,
     subject: '🔐 Password Reset Link',
     html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link will expire in 1 hour.</p>`,

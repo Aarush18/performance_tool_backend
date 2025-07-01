@@ -7,6 +7,8 @@ import {
   deleteUser,
   updateUserRole, 
   forceResetPassword,
+  updateUserStatus,
+  changeUserPassword,
   
   // Team Management
   getManagers,
@@ -48,9 +50,11 @@ router.get('/dashboard-stats', auth, authorizeRoles(['super-admin']), getDashboa
 router.post('/create-user', auth, authorizeRoles(['super-admin']), createUser)
 router.get('/users', auth, authorizeRoles(['super-admin']), getAllUsers)
 router.put('/users/:id', auth, authorizeRoles(['super-admin']), updateUserBySuperAdmin)
+router.put('/users/:id/status', auth, authorizeRoles(['super-admin']), updateUserStatus)
 router.delete('/delete-user/:id', auth, authorizeRoles(['super-admin']), deleteUser)
 router.put('/users/:id/role', auth, authorizeRoles(['super-admin']), updateUserRole)
 router.post('/users/:id/reset-password', auth, authorizeRoles(['super-admin']), forceResetPassword)
+router.put('/users/:id/change-password', auth, authorizeRoles(['super-admin']), changeUserPassword)
 router.post('/employees/import', auth, authorizeRoles(['super-admin']), upload.single('file'), importEmployeesCSV)
 
 // Team Management Routes

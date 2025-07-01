@@ -77,7 +77,8 @@ export const getAllUsers = async (req, res) => {
       SELECT 
         u.id,
         u.email,
-        r.name AS role
+        r.name AS role,
+        u.status
       FROM users u
       JOIN roles r ON u.role_id = r.id
       ORDER BY u.id
@@ -400,3 +401,159 @@ export const importManagerMappingsCSV = async (req, res) => {
         res.status(500).json({ message: 'CSV parse error', error: err.message });
       });
   };
+
+export const importEmployeesCSV = async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const results = [];
+    const errors = [];
+    const filePath = req.file.path;
+
+    fs.createReadStream(filePath)
+        .pipe(parse({ columns: true, trim: true }))
+        .on('data', (row) => {
+            if (!row.name || !row.email) {
+                errors.push({ row, error: 'Missing name or email' });
+                return;
+            }
+            results.push(row);
+        })
+        .on('end', async () => {
+            let successCount = 0;
+            const successfulEmails = [];
+            for (const emp of results) {
+                try {
+                    const result = await pool.query(
+                        'INSERT INTO employees (name, email, active_flag) VALUES ($1, $2, true) ON CONFLICT (email) DO NOTHING RETURNING *',
+                        [emp.name, emp.email]
+                    );
+                    if (result.rows.length > 0) {
+                        successCount++;
+                        successfulEmails.push(emp.email);
+                    }
+                } catch (err) {
+                    errors.push({ row: emp, error: err.message });
+                }
+            }
+
+            if (successCount > 0) {
+                await logActivity(
+                    req.user.id,
+                    "Bulk Import Employees",
+                    `Successfully imported ${successCount} employees: ${successfulEmails.join(', ')}`
+                );
+            }
+
+            fs.unlinkSync(filePath); // Clean up uploaded file
+            res.json({
+                message: `Imported ${successCount} employees.`,
+                errors,
+            });
+        })
+        .on('error', (err) => {
+            fs.unlinkSync(filePath);
+            res.status(500).json({ message: 'CSV parse error', error: err.message });
+        });
+};
+
+export const getFilteredUsers = async (req, res) => {
+  const { role, search, status, page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  let whereClauses = [];
+  let params = [];
+
+  if (role === 'employee') {
+    // Employee list from employees table
+    if (search) {
+      whereClauses.push('(email ILIKE $' + (params.length + 1) + ' OR name ILIKE $' + (params.length + 1) + ')');
+      params.push(`%${search}%`);
+    }
+    // Note: 'employees' table might not have status. If it does, it needs to be added here.
+    let whereSQL = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+    const query = `
+      SELECT id, name, email
+      FROM employees
+      ${whereSQL}
+      ORDER BY id
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `;
+    params.push(parseInt(limit), offset);
+    try {
+      const result = await pool.query(query, params);
+      // Add role field for frontend compatibility
+      const employees = result.rows.map(emp => ({ ...emp, role: 'employee' }));
+      res.json(employees);
+    } catch (err) {
+      console.error('Error fetching employees:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+    return;
+  }
+
+  // Non-employee users from users/roles
+  if (role) {
+    whereClauses.push('r.name = $' + (params.length + 1));
+    params.push(role);
+  }
+  if (status) {
+    whereClauses.push('u.status = $' + (params.length + 1));
+    params.push(status);
+  }
+  if (search) {
+    whereClauses.push('(u.email ILIKE $' + (params.length + 1) + ')');
+    params.push(`%${search}%`);
+  }
+  let whereSQL = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+  const query = `
+    SELECT u.id, u.email, r.name AS role, u.status
+    FROM users u
+    JOIN roles r ON u.role_id = r.id
+    ${whereSQL}
+    ORDER BY u.id
+    LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+  `;
+  params.push(parseInt(limit), offset);
+
+  try {
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching filtered users:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const updateUserStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const adminId = req.user.id;
+
+  if (!status || !['active', 'inactive', 'archived'].includes(status)) {
+      return res.status(400).json({ message: "Invalid status provided" });
+  }
+
+  try {
+      const result = await pool.query(
+          "UPDATE users SET status = $1 WHERE id = $2 RETURNING id, email, status",
+          [status, id]
+      );
+
+      if (result.rows.length === 0) {
+          return res.status(404).json({ message: "User not found" });
+      }
+      
+      const userEmail = result.rows[0].email;
+      await logActivity(adminId, "Update User Status", `Set user ${userEmail} status to ${status}`);
+
+      res.json({
+          message: `User status updated to ${status}`,
+          user: result.rows[0]
+      });
+  } catch (err) {
+      console.error("Update user status error:", err);
+      res.status(500).json({ message: "Server error" });
+  }
+};
