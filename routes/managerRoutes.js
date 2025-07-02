@@ -9,6 +9,7 @@ import {
   updateManagerActivityLog,
   deleteManagerActivityLog
 } from "../controllers/managerController.js"
+import { getMyEmployees } from "../controllers/employeeController.js"
 
 const router = express.Router()
 
@@ -18,6 +19,9 @@ router.use(authorizeRoles(["manager"]))
 
 // GET all performance notes (only ones created by the manager)
 router.get("/notes", getAllPerformanceNotes)
+
+// GET manager's own team
+router.get("/my-employees", getMyEmployees)
 
 // POST add a new performance note
 router.post("/notes", addPerformanceNote)
